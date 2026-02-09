@@ -1,0 +1,130 @@
+services:
+  postgres:
+    build: ./postgres
+    container_name: carsales_postgres
+    env_file:
+      - .env
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      # Explicitly set database to avoid defaulting to the user name
+      test: ["CMD-SHELL", "pg_isready -U carsales_user -d ${POSTGRES_DB:-carsales}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - carsales_network
+
+  redis:
+    build: ./redis
+    container_name: carsales_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - carsales_network
+
+  app:
+    build: ./app
+    container_name: carsales_app
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./app:/app
+      - ./uploads:/app/uploads
+      - ./tmp:/app/tmp
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      clamd:
+        condition: service_healthy
+    networks:
+      - carsales_network
+
+  minio:
+    image: minio/minio:latest
+    container_name: carsales_minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - carsales_network
+
+  clamd:
+    image: clamav/clamav:latest
+    container_name: carsales_clamd
+    ports:
+      - "3310:3310"
+    environment:
+      CLAMAV_NO_FRESHCLAM: "true"
+    volumes:
+      - clamd_data:/var/lib/clamav
+    healthcheck:
+      test: ["CMD", "clamdscan", "--version"]
+      interval: 20s
+      timeout: 10s
+      retries: 15
+    networks:
+      - carsales_network
+    restart: always
+  
+  varnish:
+    build: ./varnish
+    container_name: varnish_cache
+    ports:
+      - "6081:6081"
+    depends_on:
+      minio:
+        condition: service_healthy
+    volumes:
+      - ./varnish/default.vcl:/etc/varnish/default.vcl:ro
+    tmpfs:
+      - /var/lib/varnish      # in-memory cache storage (fast!)
+    environment:
+      - VARNISH_SIZE=256M     # cache size – adjust to 1G or more if you have RAM
+    command:
+      - "-F"                  # foreground
+      - "-a" 
+      - ":6081"               # listen port inside container
+      - "-f" 
+      - "/etc/varnish/default.vcl"
+      - "-s" 
+      - "malloc,${VARNISH_SIZE}"
+    networks:
+      - carsales_network
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  clamd_data:
+  varnish_cache:
+
+networks:
+  carsales_network:
+    driver: bridge
