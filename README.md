@@ -66,8 +66,8 @@ I built CarSales API to go beyond simple CRUD demos and practice real-world back
 
 ```bash
 # Clone & start everything with one command
-git clone https://github.com/yourusername/carsales-api.git
-cd carsales-api
+git clone https://github.com/pedrocotrim/fastapi-carsales.git
+cd fastapi-carsales
 docker compose up -d
 
 # API will be available at http://localhost:8000
